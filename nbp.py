@@ -1,5 +1,6 @@
 import datetime
 import requests
+import xml.etree.ElementTree as ET
 
 
 class ExchangeRate:
@@ -10,23 +11,23 @@ class ExchangeRate:
         self.bid_rate = bid_rate
 
     def __str__(self):
-        return f'< {self.currency} ({self.code}) \t{self.ask_rate}\t{self.bid_rate} >'
+        return f"< {self.currency} ({self.code}) \t{self.ask_rate}\t{self.bid_rate} >"
 
 
 class ExchangeRateTable:
     def __init__(self, name, effective_date, rates=None):
         self.name = name
-        self.effective_date = datetime.datetime.strptime(effective_date, '%Y-%m-%d')
+        self.effective_date = datetime.datetime.strptime(effective_date, "%Y-%m-%d")
         self._rates = rates if rates is not None else []
         # if instead of None one uses [] all instances would use the same list
 
     def __str__(self):
-        return f'{self.name} - {self.effective_date}'
+        return f"{self.name} - {self.effective_date}"
 
     def __getitem__(self, item):
         res = self.get_rate(item)
         if res is None:
-            raise KeyError('Exchange error not found')
+            raise KeyError("Exchange error not found")
         return res
 
     def add_rate(self, rate):
@@ -45,26 +46,44 @@ class ExchangeRateTable:
         return {curr.code: (curr.ask_rate, curr.bid_rate) for curr in self.rates()}
 
 
-def get_exchange_rate_table(date, format='json'):
-    url = f'http://api.nbp.pl/api/exchangerates/tables/C/{date}'
-    params = {'format': format}
+def get_exchange_rate_table(date, format="json"):
+    url = f"http://api.nbp.pl/api/exchangerates/tables/C/{date}"
+    params = {"format": format}
     resp = requests.get(url, params=params)
     try:
         resp.raise_for_status()
-        if format == 'json':
-            return _from_json(resp)
+        if format == "json":
+            return _from_xml(resp)
+        if format == "xml":
+            return _from_xml(resp)
         else:
             return None
     except requests.exceptions.HTTPError:
-        print('Connection error')
+        print("Connection error")
 
 
 def _from_json(resp):
     resp_dict = resp.json()[0]
-    rates = [ExchangeRate(rate['currency'], rate['code'], rate['ask'], rate['bid'])
-             for rate in resp_dict['rates']]
-    table = ExchangeRateTable(resp_dict['table'], resp_dict['effectiveDate'], rates)
+    rates = [
+        ExchangeRate(rate["currency"], rate["code"], rate["ask"], rate["bid"])
+        for rate in resp_dict["rates"]
+    ]
+    table = ExchangeRateTable(resp_dict["no"], resp_dict["effectiveDate"], rates)
     return table
 
 
-
+def _from_xml(resp):
+    resp_dict = ET.fromstring(resp.content)[0]
+    rates = [
+        ExchangeRate(
+            rate.find("Currency").text,
+            rate.find("Code").text,
+            rate.find("Ask").text,
+            rate.find("Bid").text,
+        )
+        for rate in resp_dict.iter("Rate")
+    ]
+    table = ExchangeRateTable(
+        resp_dict.find("No").text, resp_dict.find("EffectiveDate").text, rates
+    )
+    return table
